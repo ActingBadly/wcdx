@@ -18,7 +18,7 @@
 #include <cstddef>
 #include <cstdlib>
 
-#define NOMINMAX
+//#define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 #include <comdef.h>

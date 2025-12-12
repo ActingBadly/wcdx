@@ -8,5 +8,6 @@
 
 
 extern HINSTANCE DllInstance;
+extern bool WIDESCREEN;
 
 #endif

@@ -5,7 +5,7 @@
 #include <stdext/string.h>
 #include <stdext/utility.h>
 
-#define NOMINMAX
+//#define NOMINMAX
 #include <Windows.h>
 #include <InitGuid.h>
 #include <dsound.h>

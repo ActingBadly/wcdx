@@ -19,7 +19,7 @@
 #include <cstdint>
 #include <cwchar>
 
-#define NOMINMAX
+//#define NOMINMAX
 #include <Windows.h>
 #include <comip.h>
 #include <comdef.h>

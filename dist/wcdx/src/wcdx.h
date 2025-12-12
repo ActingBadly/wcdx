@@ -2,17 +2,16 @@
 #define WCDX_INCLUDED
 #pragma once
 
-#include "resource.h"
-
 #include "platform.h"
 
 #include <iwcdx.h>
+
+#include "resource.h"
 
 #include <cstddef>
 
 #include <comdef.h>
 #include <d3d9.h>
-
 
 #define DEBUG_SCREENSHOTS 0
 
@@ -38,10 +37,11 @@ public:
     HRESULT STDMETHODCALLTYPE SetVisible(BOOL visible) override;
     HRESULT STDMETHODCALLTYPE SetPalette(const WcdxColor entries[256]) override;
     HRESULT STDMETHODCALLTYPE UpdatePalette(UINT index, const WcdxColor* entry) override;
-    HRESULT STDMETHODCALLTYPE UpdateFrame(INT x, INT y, UINT width, UINT height, UINT pitch, const byte* bits) override;
+    HRESULT STDMETHODCALLTYPE UpdateFrame(INT x, INT y, UINT width, UINT height, UINT pitch, const BYTE* bits) override;
     HRESULT STDMETHODCALLTYPE Present() override;
 
     HRESULT STDMETHODCALLTYPE IsFullScreen() override;
+
     HRESULT STDMETHODCALLTYPE ConvertPointToClient(POINT* point) override;
     HRESULT STDMETHODCALLTYPE ConvertPointFromClient(POINT* point) override;
     HRESULT STDMETHODCALLTYPE ConvertRectToClient(RECT* rect) override;
@@ -63,7 +63,7 @@ public:
     HRESULT STDMETHODCALLTYPE QueryValue(const wchar_t* keyname, const wchar_t* valuename, void* data, DWORD* size) override;
     HRESULT STDMETHODCALLTYPE SetValue(const wchar_t* keyname, const wchar_t* valuename, DWORD type, const void* data, DWORD size) override;
 
-    HRESULT STDMETHODCALLTYPE FillSnow(byte color_index, INT x, INT y, UINT width, UINT height, UINT pitch, byte* pixels) override;
+    HRESULT STDMETHODCALLTYPE FillSnow(BYTE color_index, INT x, INT y, UINT width, UINT height, UINT pitch, BYTE* pixels) override;
 
 private:
     static ATOM FrameWindowClass();
@@ -96,9 +96,9 @@ private:
     DWORD _frameExStyle;
     RECT _frameRect;
 
-    IDirect3D9Ptr _d3d;
-    IDirect3DDevice9Ptr _device;
-    IDirect3DSurface9Ptr _surface;
+    IDirect3D9* _d3d;
+    IDirect3DDevice9* _device;
+    IDirect3DSurface9* _surface;
 
     D3DPRESENT_PARAMETERS _presentParams;
 

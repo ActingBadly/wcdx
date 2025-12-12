@@ -1,14 +1,83 @@
+#define WCDX_EXPORTS
 #include "wcdx.h"
+#include <iwcdx.h>
+
+// Define the IID for IWcdx here so __uuidof/IID lookups work without relying
+// on compiler-specific uuidof linkage. This GUID is arbitrary but must match
+// any clients that expect the same IID.
+extern "C" WCDXAPI const GUID IID_IWcdx = { 0xF8C1A9E0, 0x1A2B, 0x4C3D, { 0x9E, 0x0F, 0x12, 0x34, 0x56, 0x78, 0x90, 0xAB } };
 
 #include <image/image.h>
 #include <image/resources.h>
 
-#include <stdext/array_view.h>
-#include <stdext/scope_guard.h>
-#include <stdext/file.h>
-#include <stdext/format.h>
-#include <stdext/multi.h>
-#include <stdext/utility.h>
+#include <algorithm>
+
+#define INITGUID
+#include <KnownFolders.h>
+#include <ShlObj.h> // Often needed for functions that use KNOWNFOLDERID
+
+// lightweight, std-compatible scope-exit helper (replaces stdext::at_scope_exit)
+#include <utility>
+#include <type_traits>
+
+    // Discards a value; can be used to silence warnings about unused entities.
+    template <class... Ts>
+    constexpr void discard(Ts&&...) noexcept
+    {
+    }
+
+    // Returns the length of an array.
+    template <class T, size_t size>
+    constexpr size_t lengthof(T (&)[size]) noexcept
+    {
+        return size;
+    }
+
+template<typename F>
+class scope_exit_impl
+{
+public:
+    explicit scope_exit_impl(F&& f) noexcept(std::is_nothrow_constructible<F, F&&>::value)
+        : _f(std::forward<F>(f)), _active(true)
+    {
+    }
+
+    scope_exit_impl(scope_exit_impl&& other) noexcept(std::is_nothrow_move_constructible<F>::value)
+        : _f(std::move(other._f)), _active(other._active)
+    {
+        other._active = false;
+    }
+
+    ~scope_exit_impl() noexcept
+    {
+        if (_active)
+        {
+            try { _f(); } catch (...) {}
+        }
+    }
+
+    scope_exit_impl(const scope_exit_impl&) = delete;
+    scope_exit_impl& operator=(const scope_exit_impl&) = delete;
+
+    void release() noexcept { _active = false; }
+
+private:
+    F _f;
+    bool _active;
+};
+
+template<typename F>
+inline scope_exit_impl<std::decay_t<F>> make_scope_exit(F&& f)
+{
+    return scope_exit_impl<std::decay_t<F>>(std::forward<F>(f));
+}
+
+// helper macros to mimic previous at_scope_exit usage
+#define AT_CONCAT2(a, b) a##b
+#define AT_CONCAT(a, b) AT_CONCAT2(a, b)
+#define at_scope_exit(expr) auto AT_CONCAT(_scope_exit_, __LINE__) = make_scope_exit(expr)
+
+
 
 #include <algorithm>
 #include <iterator>
@@ -18,6 +87,11 @@
 
 #include <io.h>
 #include <fcntl.h>
+
+
+
+
+
 
 #pragma warning(push)
 #pragma warning(disable:4091)   // 'typedef ': ignored on left of 'tagGPFIDL_FLAGS' when no variable is declared
@@ -63,9 +137,10 @@ Wcdx::Wcdx(LPCWSTR title, WNDPROC windowProc, bool _fullScreen)
 #endif
 {
     // Create the window.
-    auto hwnd = ::CreateWindowEx(_frameExStyle,
+    auto hwnd = ::CreateWindowExW(_frameExStyle,
         reinterpret_cast<LPCWSTR>(FrameWindowClass()), title,
         _frameStyle,
+//        CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
         CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
         nullptr, nullptr, DllInstance, this);
     if (hwnd == nullptr)
@@ -73,9 +148,9 @@ Wcdx::Wcdx(LPCWSTR title, WNDPROC windowProc, bool _fullScreen)
     _window.Reset(hwnd, &::DestroyWindow);
 
     // Force 4:3 aspect ratio.
-    ::GetWindowRect(_window, &_frameRect);
-    OnSizing(WMSZ_TOP, &_frameRect);
-    ::MoveWindow(_window, _frameRect.left, _frameRect.top, _frameRect.right - _frameRect.left, _frameRect.bottom - _frameRect.top, FALSE);
+   ::GetWindowRect(_window, &_frameRect);
+   OnSizing(WMSZ_TOP, &_frameRect);
+   ::MoveWindow(_window, _frameRect.left, _frameRect.top, _frameRect.right - _frameRect.left, _frameRect.bottom - _frameRect.top, FALSE);
 
     // Initialize D3D.
     _d3d = ::Direct3DCreate9(D3D_SDK_VERSION);
@@ -90,7 +165,7 @@ Wcdx::Wcdx(LPCWSTR title, WNDPROC windowProc, bool _fullScreen)
         _com_raise_error(hr);
 
     WcdxColor defColor = { 0, 0, 0, 0xFF };
-    std::fill_n(_palette, stdext::lengthof(_palette), defColor);
+    std::fill_n(_palette, lengthof(_palette), defColor);
 
     SetFullScreen(IsDebuggerPresent() ? false : _fullScreen);
 
@@ -117,7 +192,8 @@ HRESULT STDMETHODCALLTYPE Wcdx::QueryInterface(REFIID riid, void** ppvObject)
         ++_refCount;
         return S_OK;
     }
-    if (IsEqualIID(riid, IID_IWcdx))
+   
+   if (IsEqualIID(riid, IID_IWcdx))
     {
         *reinterpret_cast<IWcdx**>(ppvObject) = this;
         ++_refCount;
@@ -167,7 +243,7 @@ HRESULT STDMETHODCALLTYPE Wcdx::UpdatePalette(UINT index, const WcdxColor* entry
     return S_OK;
 }
 
-HRESULT STDMETHODCALLTYPE Wcdx::UpdateFrame(INT x, INT y, UINT width, UINT height, UINT pitch, const byte* bits)
+HRESULT STDMETHODCALLTYPE Wcdx::UpdateFrame(INT x, INT y, UINT width, UINT height, UINT pitch, const BYTE* bits)
 {
     RECT rect = { x, y, LONG(x + width), LONG(y + height) };
     RECT clipped =
@@ -282,7 +358,7 @@ HRESULT STDMETHODCALLTYPE Wcdx::Present()
 
         if (_dirty || _sizeChanged)
         {
-            IDirect3DSurface9Ptr backBuffer;
+            IDirect3DSurface9* backBuffer;
             if (FAILED(hr = _device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &backBuffer)))
                 return hr;
             if (FAILED(hr = _device->StretchRect(_surface, nullptr, backBuffer, &activeRect, D3DTEXF_POINT)))
@@ -302,6 +378,10 @@ HRESULT STDMETHODCALLTYPE Wcdx::IsFullScreen()
 {
     return _fullScreen ? S_OK : S_FALSE;
 }
+
+
+
+
 
 HRESULT STDMETHODCALLTYPE Wcdx::ConvertPointToClient(POINT* point)
 {
@@ -385,9 +465,9 @@ HRESULT STDMETHODCALLTYPE Wcdx::SavedGameOpen(const wchar_t* subdir, const wchar
 
             wchar_t* pathEnd;
             size_t remaining;
-            if (FAILED(hr = StringCchCatEx(path, _MAX_PATH, L"\\", &pathEnd, &remaining, 0)))
+            if (FAILED(hr = StringCchCatExW(path, _MAX_PATH, L"\\", &pathEnd, &remaining, 0)))
                 return hr;
-            if (FAILED(hr = StringCchCopy(pathEnd, remaining, filename)))
+            if (FAILED(hr = StringCchCopyW(pathEnd, remaining, filename)))
                 return hr;
 
             auto error = _wsopen_s(filedesc, path, oflag, _SH_DENYNO, pmode);
@@ -412,15 +492,15 @@ HRESULT STDMETHODCALLTYPE Wcdx::SavedGameOpen(const wchar_t* subdir, const wchar
 
                 wchar_t* pathEnd;
                 size_t remaining;
-                if (FAILED(StringCchCatEx(path, _MAX_PATH, L"\\", &pathEnd, &remaining, 0)))
+                if (FAILED(StringCchCatExW(path, _MAX_PATH, L"\\", &pathEnd, &remaining, 0)))
                     continue;
-                if (FAILED(StringCchCopy(pathEnd, remaining, filename)))
+                if (FAILED(StringCchCopyW(pathEnd, remaining, filename)))
                     continue;
 
-                if (::MoveFileEx(filename, path, MOVEFILE_COPY_ALLOWED | MOVEFILE_REPLACE_EXISTING)
-                    || ::CopyFile(filename, path, FALSE))
+                if (::MoveFileExW(filename, path, MOVEFILE_COPY_ALLOWED | MOVEFILE_REPLACE_EXISTING)
+                    || ::CopyFileW(filename, path, FALSE))
                 {
-                    ::DeleteFile(filename);
+                    ::DeleteFileW(filename);
                     filename = path;
                     break;
                 }
@@ -534,12 +614,12 @@ HRESULT STDMETHODCALLTYPE Wcdx::QueryValue(const wchar_t* keyname, const wchar_t
     for (auto root : roots)
     {
         HKEY key;
-        auto error = ::RegOpenKeyEx(root, keyname, 0, KEY_QUERY_VALUE, &key);
+        auto error = ::RegOpenKeyExW(root, keyname, 0, KEY_QUERY_VALUE, &key);
         if (error != ERROR_SUCCESS)
             return HRESULT_FROM_WIN32(error);
         at_scope_exit([&]{ ::RegCloseKey(key); });
 
-        error = ::RegQueryValueEx(key, valuename, nullptr, nullptr, static_cast<BYTE*>(data), size);
+        error = ::RegQueryValueExW(key, valuename, nullptr, nullptr, static_cast<BYTE*>(data), size);
         if (error != ERROR_FILE_NOT_FOUND)
             return HRESULT_FROM_WIN32(error);
     }
@@ -550,16 +630,16 @@ HRESULT STDMETHODCALLTYPE Wcdx::QueryValue(const wchar_t* keyname, const wchar_t
 HRESULT STDMETHODCALLTYPE Wcdx::SetValue(const wchar_t* keyname, const wchar_t* valuename, DWORD type, const void* data, DWORD size)
 {
     HKEY key;
-    auto error = ::RegCreateKeyEx(HKEY_CURRENT_USER, keyname, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr);
+    auto error = ::RegCreateKeyExW(HKEY_CURRENT_USER, keyname, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr);
     if (error != ERROR_SUCCESS)
         return HRESULT_FROM_WIN32(error);
     at_scope_exit([&]{ ::RegCloseKey(key); });
 
-    error = ::RegSetValueEx(key, valuename, 0, type, static_cast<const BYTE*>(data), size);
+    error = ::RegSetValueExW(key, valuename, 0, type, static_cast<const BYTE*>(data), size);
     return HRESULT_FROM_WIN32(error);
 }
 
-HRESULT STDMETHODCALLTYPE Wcdx::FillSnow(byte color_index, INT x, INT y, UINT width, UINT height, UINT pitch, byte* pixels)
+HRESULT STDMETHODCALLTYPE Wcdx::FillSnow(BYTE color_index, INT x, INT y, UINT width, UINT height, UINT pitch, BYTE* pixels)
 {
     for (UINT h = 0; h != height; ++h)
     {
@@ -583,9 +663,9 @@ ATOM Wcdx::FrameWindowClass()
         if (hcursor == nullptr)
             throw std::system_error(::GetLastError(), std::system_category());
 
-        WNDCLASSEX wc =
+        WNDCLASSEXW wc =
         {
-            sizeof(WNDCLASSEX),
+            sizeof(WNDCLASSEXW),
             0,
             FrameWindowProc,
             0,
@@ -599,7 +679,7 @@ ATOM Wcdx::FrameWindowClass()
             nullptr
         };
 
-        return ::RegisterClassEx(&wc);
+        return ::RegisterClassExW(&wc);
     }();
 
     return windowClass;
@@ -676,7 +756,7 @@ LRESULT CALLBACK Wcdx::FrameWindowProc(HWND hwnd, UINT message, WPARAM wParam, L
 
 void Wcdx::OnSize(DWORD resizeType, WORD clientWidth, WORD clientHeight)
 {
-    stdext::discard(resizeType, clientWidth, clientHeight);
+    discard(resizeType, clientWidth, clientHeight);
 
     _sizeChanged = true;
     ::PostMessage(_window, WM_APP_RENDER, 0, 0);
@@ -684,7 +764,7 @@ void Wcdx::OnSize(DWORD resizeType, WORD clientWidth, WORD clientHeight)
 
 void Wcdx::OnActivate(WORD state, BOOL minimized, HWND other)
 {
-    stdext::discard(minimized, other);
+    discard(minimized, other);
 
     if (state != WA_INACTIVE)
         ConfineCursor();
@@ -712,7 +792,7 @@ void Wcdx::OnNCDestroy()
 
 bool Wcdx::OnNCLButtonDblClk(int hittest, POINTS position)
 {
-    stdext::discard(position);
+    discard(position);
 
     if (hittest != HTCAPTION)
         return false;
@@ -735,7 +815,7 @@ bool Wcdx::OnSysChar(DWORD vkey, WORD repeatCount, WORD flags)
 
 bool Wcdx::OnSysCommand(WORD type, SHORT x, SHORT y)
 {
-    stdext::discard(x, y);
+    discard(x, y);
 
     if (type == SC_MAXIMIZE)
     {
@@ -772,13 +852,24 @@ void Wcdx::OnSizing(DWORD windowEdge, RECT* dragRect)
         break;
 
     default:
-        adjustWidth = height > (3 * width) / 4;
+        if (WIDESCREEN){
+            adjustWidth = (height * 16) > (9 * width);
+
+        }
+        else{
+            adjustWidth = (height * 4) > (3 * width);
+        }
         break;
     }
 
     if (adjustWidth)
     {
-        width = (4 * height) / 3;
+                if (WIDESCREEN){
+                    width = (16 * height) / 9;
+                }
+                else{
+                    width = (4 * height) / 3;
+                }
         auto delta = width - (client.right - client.left);
         switch (windowEdge)
         {
@@ -801,7 +892,12 @@ void Wcdx::OnSizing(DWORD windowEdge, RECT* dragRect)
     }
     else
     {
-        height = (3 * width) / 4;
+        if (WIDESCREEN){
+            height = (9 * width) / 16;
+        }
+        else{
+            height = (3 * width) / 4;
+        }
         auto delta = height - (client.bottom - client.top);
         switch (windowEdge)
         {
@@ -953,8 +1049,24 @@ void Wcdx::SetFullScreen(bool enabled)
 
 RECT Wcdx::GetContentRect(RECT clientRect)
 {
-    auto width = (4 * clientRect.bottom) / 3;
-    auto height = (3 * clientRect.right) / 4;
+
+
+
+    auto width = 0, height = 0;
+
+
+    if (WIDESCREEN)
+    {
+        width = (16 * clientRect.bottom) / 9;
+        height = (9 * clientRect.right) / 16;
+    }
+else
+    {
+        width = (4 * clientRect.bottom) / 3;
+        height = (3 * clientRect.right) / 4;
+    }
+
+
     if (width < clientRect.right)
     {
         clientRect.left = (clientRect.right - width) / 2;
@@ -1013,7 +1125,7 @@ namespace
     {
         typedef HRESULT(STDAPICALLTYPE* GetKnownFolderPathFn)(REFKNOWNFOLDERID rfid, DWORD dwFlags, HANDLE hToken, PWSTR* ppszPath);
 
-        auto shellModule = ::GetModuleHandle(L"Shell32.dll");
+        auto shellModule = ::GetModuleHandleW(L"Shell32.dll");
         if (shellModule != nullptr)
         {
             auto GetKnownFolderPath = reinterpret_cast<GetKnownFolderPathFn>(::GetProcAddress(shellModule, "SHGetKnownFolderPath"));
@@ -1031,11 +1143,11 @@ namespace
 
                 PWSTR pathEnd;
                 size_t remaining;
-                if (FAILED(hr = ::StringCchCopyEx(path, MAX_PATH, folderPath, &pathEnd, &remaining, 0)))
+                if (FAILED(hr = ::StringCchCopyExW(path, MAX_PATH, folderPath, &pathEnd, &remaining, 0)))
                     return hr;
-                if (FAILED(hr = ::StringCchCopyEx(pathEnd, remaining, L"\\", &pathEnd, &remaining, 0)))
+                if (FAILED(hr = ::StringCchCopyExW(pathEnd, remaining, L"\\", &pathEnd, &remaining, 0)))
                     return hr;
-                return ::StringCchCopy(pathEnd, remaining, subdir);
+                return ::StringCchCopyW(pathEnd, remaining, subdir);
             }
         }
 
@@ -1044,20 +1156,20 @@ namespace
 
     HRESULT GetLocalAppDataPath(LPCWSTR subdir, LPWSTR path)
     {
-        auto hr = ::SHGetFolderPath(nullptr, CSIDL_LOCAL_APPDATA, nullptr, SHGFP_TYPE_CURRENT, path);
+        auto hr = ::SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, SHGFP_TYPE_CURRENT, path);
         if (FAILED(hr))
             return hr;
 
         PWSTR pathEnd;
         size_t remaining;
-        if (FAILED(hr = ::StringCchCatEx(path, MAX_PATH, L"\\", &pathEnd, &remaining, 0)))
+        if (FAILED(hr = ::StringCchCatExW(path, MAX_PATH, L"\\", &pathEnd, &remaining, 0)))
             return hr;
-        return ::StringCchCopy(pathEnd, remaining, subdir);
+        return ::StringCchCopyW(pathEnd, remaining, subdir);
     }
 
     bool CreateDirectoryRecursive(LPWSTR pathName)
     {
-        if (::CreateDirectory(pathName, nullptr) || ::GetLastError() == ERROR_ALREADY_EXISTS)
+        if (::CreateDirectoryW(pathName, nullptr) || ::GetLastError() == ERROR_ALREADY_EXISTS)
             return true;
 
         if (::GetLastError() != ERROR_PATH_NOT_FOUND)
@@ -1070,6 +1182,6 @@ namespace
         *i = L'\0';
         auto result = CreateDirectoryRecursive(pathName);
         *i = L'\\';
-        return result && ::CreateDirectory(pathName, nullptr);
+        return result && ::CreateDirectoryW(pathName, nullptr);
     }
 }

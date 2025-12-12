@@ -2,7 +2,7 @@
 #define RESOURCE_INCLUDED
 #pragma once
 
-#include <stdext/traits.h>
+//#include <stdext/traits.h>
 
 #include <functional>
 
@@ -14,14 +14,14 @@ public:
     using Deleter = std::function<void (Handle)>;
 
 public:
-    template <class H = Handle, STDEXT_REQUIRES(std::is_default_constructible_v<H>)>
+    template <class H = Handle, std::enable_if_t<(std::is_default_constructible_v<H>), std::nullptr_t> = nullptr>
     SmartResource()
         : handle(), deleter()
     {
     }
 
     template <class H,
-        STDEXT_REQUIRES(std::is_constructible_v<Handle, decltype(std::forward<H>(std::declval<H&&>()))>)>
+        std::enable_if_t<(std::is_constructible_v<Handle, decltype(std::forward<H>(std::declval<H&&>()))>), std::nullptr_t> = nullptr>
     explicit SmartResource(H&& handle, Deleter deleter)
         : handle(std::forward<H>(handle)), deleter(std::move(deleter))
     {
@@ -55,7 +55,7 @@ public:
     Handle Get() const { return handle; }
 
     template <class H,
-        STDEXT_REQUIRES(std::is_assignable_v<Handle&, decltype(std::forward<H>(std::declval<H&&>()))>)>
+    std::enable_if_t<(std::is_assignable_v<Handle&, decltype(std::forward<H>(std::declval<H&&>()))>), std::nullptr_t> = nullptr>
     void Reset(H&& handle, Deleter deleter)
     {
         this->handle = std::forward<H>(handle);
