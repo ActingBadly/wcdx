@@ -20,18 +20,8 @@ extern "C" WCDXAPI const GUID IID_IWcdx = { 0xF8C1A9E0, 0x1A2B, 0x4C3D, { 0x9E, 
 #include <utility>
 #include <type_traits>
 
-    // Discards a value; can be used to silence warnings about unused entities.
-    template <class... Ts>
-    constexpr void discard(Ts&&...) noexcept
-    {
-    }
-
-    // Returns the length of an array.
-    template <class T, size_t size>
-    constexpr size_t lengthof(T (&)[size]) noexcept
-    {
-        return size;
-    }
+    // Use standard utilities instead of small custom helpers.
+    // Unused parameter suppression: use (void)x; and array-size: std::size()
 
 template<typename F>
 class scope_exit_impl
@@ -104,7 +94,8 @@ namespace
 {
     enum
     {
-        WM_APP_RENDER = WM_APP
+        WM_APP_RENDER = WM_APP,
+        WM_APP_ASPECT_CHANGED = WM_APP + 1
     };
 
     POINT ConvertTo(POINT point, RECT rect);
@@ -140,7 +131,6 @@ Wcdx::Wcdx(LPCWSTR title, WNDPROC windowProc, bool _fullScreen)
     auto hwnd = ::CreateWindowExW(_frameExStyle,
         reinterpret_cast<LPCWSTR>(FrameWindowClass()), title,
         _frameStyle,
-//        CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
         CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
         nullptr, nullptr, DllInstance, this);
     if (hwnd == nullptr)
@@ -165,7 +155,7 @@ Wcdx::Wcdx(LPCWSTR title, WNDPROC windowProc, bool _fullScreen)
         _com_raise_error(hr);
 
     WcdxColor defColor = { 0, 0, 0, 0xFF };
-    std::fill_n(_palette, lengthof(_palette), defColor);
+    std::fill_n(_palette, std::size(_palette), defColor);
 
     SetFullScreen(IsDebuggerPresent() ? false : _fullScreen);
 
@@ -206,18 +196,19 @@ HRESULT STDMETHODCALLTYPE Wcdx::QueryInterface(REFIID riid, void** ppvObject)
 
 ULONG STDMETHODCALLTYPE Wcdx::AddRef()
 {
-    return ++_refCount;
+    return static_cast<ULONG>(::InterlockedIncrement(&_refCount));
 }
 
 ULONG STDMETHODCALLTYPE Wcdx::Release()
 {
-    if (--_refCount == 0)
+    LONG newValue = ::InterlockedDecrement(&_refCount);
+    if (newValue == 0)
     {
         delete this;
         return 0;
     }
 
-    return _refCount;
+    return static_cast<ULONG>(newValue);
 }
 
 HRESULT STDMETHODCALLTYPE Wcdx::SetVisible(BOOL visible)
@@ -245,6 +236,9 @@ HRESULT STDMETHODCALLTYPE Wcdx::UpdatePalette(UINT index, const WcdxColor* entry
 
 HRESULT STDMETHODCALLTYPE Wcdx::UpdateFrame(INT x, INT y, UINT width, UINT height, UINT pitch, const BYTE* bits)
 {
+    if (bits == nullptr)
+        return E_POINTER;
+
     RECT rect = { x, y, LONG(x + width), LONG(y + height) };
     RECT clipped =
     {
@@ -254,15 +248,24 @@ HRESULT STDMETHODCALLTYPE Wcdx::UpdateFrame(INT x, INT y, UINT width, UINT heigh
         std::min(rect.bottom, LONG(ContentHeight))
     };
 
-    auto src = reinterpret_cast<const std::byte*>(bits);
+    const int skipLeft = clipped.left - rect.left;
+    const int skipTop = clipped.top - rect.top;
+
+    const int clippedWidth = clipped.right - clipped.left;
+    const int clippedHeight = clipped.bottom - clipped.top;
+    if (clippedWidth <= 0 || clippedHeight <= 0)
+        return S_OK; // nothing to copy
+
+    auto src = reinterpret_cast<const std::byte*>(bits) + static_cast<size_t>(skipTop) * pitch + skipLeft;
     auto dest = _framebuffer + clipped.left + (ContentWidth * clipped.top);
-    width = clipped.right - clipped.left;
-    for (height = clipped.bottom - clipped.top; height-- > 0; )
+
+    for (int row = 0; row < clippedHeight; ++row)
     {
-        std::copy_n(src, width, dest);
+        std::copy_n(src, clippedWidth, dest);
         src += pitch;
         dest += ContentWidth;
     }
+
     _dirty = true;
     return S_OK;
 }
@@ -641,12 +644,37 @@ HRESULT STDMETHODCALLTYPE Wcdx::SetValue(const wchar_t* keyname, const wchar_t* 
 
 HRESULT STDMETHODCALLTYPE Wcdx::FillSnow(BYTE color_index, INT x, INT y, UINT width, UINT height, UINT pitch, BYTE* pixels)
 {
-    for (UINT h = 0; h != height; ++h)
+    if (pixels == nullptr)
+        return E_POINTER;
+
+    // Clip negative x/y by advancing pointer and shrinking size
+    int ix = x;
+    int iy = y;
+    if (ix < 0)
     {
-        auto p = pixels + (y * pitch) + x;
-        for (UINT w = 0; w != width; ++w)
-            *p++ = byte(RandomBit() * color_index);
-        ++y;
+        if (static_cast<UINT>(-ix) >= width)
+            return S_OK;
+        width -= static_cast<UINT>(-ix);
+        ix = 0;
+    }
+    if (iy < 0)
+    {
+        if (static_cast<UINT>(-iy) >= height)
+            return S_OK;
+        pixels += static_cast<size_t>(-iy) * pitch;
+        height -= static_cast<UINT>(-iy);
+        iy = 0;
+    }
+
+    for (UINT row = 0; row < height; ++row)
+    {
+        BYTE* p = pixels + (static_cast<size_t>(iy + row) * pitch) + ix;
+        for (UINT col = 0; col < width; ++col)
+        {
+            // produce either 0 or color_index (original intent)
+            BYTE val = (RandomBit() & 1) ? color_index : 0;
+            *p++ = val;
+        }
     }
 
     return S_OK;
@@ -747,6 +775,16 @@ LRESULT CALLBACK Wcdx::FrameWindowProc(HWND hwnd, UINT message, WPARAM wParam, L
         case WM_APP_RENDER:
             wcdx->OnRender();
             break;
+
+        case WM_APP_ASPECT_CHANGED:
+            // When aspect toggles (windowed or fullscreen), force a size-change
+            // so Present will recompute active rect / bars and redraw immediately.
+            wcdx->_sizeChanged = true;
+            wcdx->ConfineCursor();
+            ::PostMessage(hwnd, WM_APP_RENDER, 0, 0);
+            wcdx->OnSizing(DWORD(wParam), reinterpret_cast<RECT*>(lParam));
+
+            return 0;
         }
         return ::CallWindowProc(wcdx->_clientWindowProc, hwnd, message, wParam, lParam);
     }
@@ -756,7 +794,7 @@ LRESULT CALLBACK Wcdx::FrameWindowProc(HWND hwnd, UINT message, WPARAM wParam, L
 
 void Wcdx::OnSize(DWORD resizeType, WORD clientWidth, WORD clientHeight)
 {
-    discard(resizeType, clientWidth, clientHeight);
+    (void)resizeType; (void)clientWidth; (void)clientHeight;
 
     _sizeChanged = true;
     ::PostMessage(_window, WM_APP_RENDER, 0, 0);
@@ -764,7 +802,7 @@ void Wcdx::OnSize(DWORD resizeType, WORD clientWidth, WORD clientHeight)
 
 void Wcdx::OnActivate(WORD state, BOOL minimized, HWND other)
 {
-    discard(minimized, other);
+    (void)minimized; (void)other;
 
     if (state != WA_INACTIVE)
         ConfineCursor();
@@ -792,7 +830,7 @@ void Wcdx::OnNCDestroy()
 
 bool Wcdx::OnNCLButtonDblClk(int hittest, POINTS position)
 {
-    discard(position);
+    (void)position;
 
     if (hittest != HTCAPTION)
         return false;
@@ -815,7 +853,7 @@ bool Wcdx::OnSysChar(DWORD vkey, WORD repeatCount, WORD flags)
 
 bool Wcdx::OnSysCommand(WORD type, SHORT x, SHORT y)
 {
-    discard(x, y);
+    (void)x; (void)y;
 
     if (type == SC_MAXIMIZE)
     {
@@ -1051,30 +1089,51 @@ RECT Wcdx::GetContentRect(RECT clientRect)
 {
 
 
-
     auto width = 0, height = 0;
 
+    // Compute client width/height from the rect returned by GetClientRect
+    const int clientW = clientRect.right - clientRect.left;
+    const int clientH = clientRect.bottom - clientRect.top;
 
     if (WIDESCREEN)
     {
-        width = (16 * clientRect.bottom) / 9;
-        height = (9 * clientRect.right) / 16;
+        const int widthForHeight = (16 * clientH) / 9; // fit 16:9 by height
+        const int heightForWidth = (9 * clientW) / 16; // fit 16:9 by width
+        if (widthForHeight <= clientW)
+        {
+            width = widthForHeight;
+            height = clientH;
+        }
+        else
+        {
+            width = clientW;
+            height = heightForWidth;
+        }
     }
-else
+    else
     {
-        width = (4 * clientRect.bottom) / 3;
-        height = (3 * clientRect.right) / 4;
+        const int widthForHeight = (4 * clientH) / 3; // fit 4:3 by height
+        const int heightForWidth = (3 * clientW) / 4; // fit 4:3 by width
+        if (widthForHeight <= clientW)
+        {
+            width = widthForHeight;
+            height = clientH;
+        }
+        else
+        {
+            width = clientW;
+            height = heightForWidth;
+        }
     }
 
-
-    if (width < clientRect.right)
+    if (width < clientW)
     {
-        clientRect.left = (clientRect.right - width) / 2;
+        clientRect.left = clientRect.left + (clientW - width) / 2;
         clientRect.right = clientRect.left + width;
     }
     else
     {
-        clientRect.top = (clientRect.bottom - height) / 2;
+        clientRect.top = clientRect.top + (clientH - height) / 2;
         clientRect.bottom = clientRect.top + height;
     }
 
@@ -1085,17 +1144,18 @@ void Wcdx::ConfineCursor()
 {
     if (_fullScreen)
     {
-        RECT contentRect;
-        ::GetClientRect(_window, &contentRect);
-        contentRect = GetContentRect(contentRect);
+        // Ensure the window's client metrics are up-to-date before computing the clip rect
+        ::UpdateWindow(_window);
 
-        POINT topLeft = { contentRect.left, contentRect.top };
-        POINT bottomRight = { contentRect.right, contentRect.bottom };
-        ::ClientToScreen(_window, &topLeft);
-        ::ClientToScreen(_window, &bottomRight);
+        RECT clientRect;
+        ::GetClientRect(_window, &clientRect);
+        RECT activeRect = GetContentRect(clientRect);
 
-        contentRect = { topLeft.x, topLeft.y, bottomRight.x, bottomRight.y };
-        ::ClipCursor(&contentRect);
+        POINT pts[2] = { { activeRect.left, activeRect.top }, { activeRect.right, activeRect.bottom } };
+        ::MapWindowPoints(_window, nullptr, pts, 2);
+
+        RECT screenRect = { pts[0].x, pts[0].y, pts[1].x, pts[1].y };
+        ::ClipCursor(&screenRect);
     }
     else
         ::ClipCursor(nullptr);

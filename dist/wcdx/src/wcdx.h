@@ -88,7 +88,7 @@ private:
     void ConfineCursor();
 
 private:
-    ULONG _refCount;
+    LONG _refCount;
     SmartResource<HWND> _window;
     HMONITOR _monitor;
     WNDPROC _clientWindowProc;

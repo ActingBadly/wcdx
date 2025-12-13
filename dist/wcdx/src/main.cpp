@@ -5,6 +5,19 @@ HINSTANCE DllInstance;
 bool WIDESCREEN = false;
 
 // Thread function that will run in the background to monitor key presses and run funcitons.
+static BOOL CALLBACK NotifyWcdxEnumProc(HWND hwnd, LPARAM lParam)
+{
+    wchar_t className[64] = { 0 };
+    if (::GetClassNameW(hwnd, className, static_cast<int>(sizeof(className) / sizeof(className[0]))))
+    {
+        if (wcscmp(className, L"Wcdx Frame Window") == 0)
+        {
+            ::PostMessage(hwnd, WM_APP + 1, 0, 0);
+        }
+    }
+    return TRUE;
+}
+
 DWORD WINAPI MainTread(LPVOID param){
    while (true){
        if (GetAsyncKeyState(VK_F11) & 0x80000){
@@ -15,8 +28,10 @@ DWORD WINAPI MainTread(LPVOID param){
            else{
                WIDESCREEN = true;
            }
+           // Notify any Wcdx frame windows so they can immediately update confinement
+           ::EnumWindows(NotifyWcdxEnumProc, 0); //Crashes today for no reason
        }
-       Sleep(200);
+       Sleep(100);
    }
     return 0;
 }
@@ -38,7 +53,5 @@ BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, [[maybe_unused]] LPVOID
     case DLL_PROCESS_DETACH:
         break;
     }
-
-
     return TRUE;
 }
