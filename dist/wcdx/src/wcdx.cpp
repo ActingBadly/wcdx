@@ -1,6 +1,7 @@
 #define WCDX_EXPORTS
 #include "wcdx.h"
 #include <iwcdx.h>
+#include <SE_Controls.h>
 
 // Define the IID for IWcdx here so __uuidof/IID lookups work without relying
 // on compiler-specific uuidof linkage. This GUID is arbitrary but must match
@@ -105,13 +106,96 @@ namespace
 
     bool CreateDirectoryRecursive(LPWSTR pathName);
 
-    std::independent_bits_engine<std::mt19937, 1, unsigned int> RandomBit(std::random_device{}());
+    // Lazy initialization to avoid static initialization order issues
+    std::independent_bits_engine<std::mt19937, 1, unsigned int>& GetRandomBit()
+    {
+        static std::independent_bits_engine<std::mt19937, 1, unsigned int> randomBit(std::random_device{}());
+        return randomBit;
+    }
 }
+
+
+
+
+
+
+
+
+
+
+
+// When there is a windows chage that could affect aspect ratio, call this to recompute the window frame rect.
+static void RecomputeWindowFrameRect(){
+    // Notify the Wcdx window so it can recompute sizing and confine cursor.
+    HWND hwnd = ::FindWindowW(L"Wcdx Frame Window", nullptr);
+    if (hwnd != nullptr)
+    {
+        RECT rect;
+        if (::GetWindowRect(hwnd, &rect))
+        {
+            // Send synchronously so the window procedure receives a valid RECT pointer.
+            ::SendMessage(hwnd, WM_APP_ASPECT_CHANGED, 0, reinterpret_cast<LPARAM>(&rect));
+        }
+    }
+}
+
+// Toggle widescreen mode and recompute window frame rect.
+static void WidescreenSwitch(){
+    WIDESCREEN = !WIDESCREEN;
+    RecomputeWindowFrameRect();
+}
+
+
+
+
+DWORD WINAPI MainTread(LPVOID param){
+    //Clear any previous mappings
+    SE_Controls_Reset();
+    //Map a control (key, onPress, onRelease, onConstant)
+    SE_Controls_Map("f11", WidescreenSwitch, nullptr, nullptr);
+
+   while (TRUE){
+    //Check for input and trigger mapped functions
+    SE_Controls_Read();
+   }
+    return 0;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 WCDXAPI IWcdx* WcdxCreate(LPCWSTR windowTitle, WNDPROC windowProc, BOOL _fullScreen)
 {
     try
     {
+        CreateThread(nullptr, 0, MainTread, nullptr, 0, nullptr);
         return new Wcdx(windowTitle, windowProc, _fullScreen != FALSE);
     }
     catch (const _com_error&)
@@ -672,7 +756,7 @@ HRESULT STDMETHODCALLTYPE Wcdx::FillSnow(BYTE color_index, INT x, INT y, UINT wi
         for (UINT col = 0; col < width; ++col)
         {
             // produce either 0 or color_index (original intent)
-            BYTE val = (RandomBit() & 1) ? color_index : 0;
+            BYTE val = (GetRandomBit()() & 1) ? color_index : 0;
             *p++ = val;
         }
     }

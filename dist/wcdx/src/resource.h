@@ -5,6 +5,8 @@
 //#include <stdext/traits.h>
 
 #include <functional>
+#include <type_traits>
+#include <utility>
 
 
 template <class Handle>
@@ -37,11 +39,12 @@ public:
 
     SmartResource& operator = (SmartResource&& other)
     {
-        if (deleter != nullptr)
+        if (deleter)
             deleter(handle);
 
         handle = std::move(other.handle);
         deleter = std::move(other.deleter);
+        return *this;
     }
 
     ~SmartResource()
@@ -58,11 +61,14 @@ public:
     std::enable_if_t<(std::is_assignable_v<Handle&, decltype(std::forward<H>(std::declval<H&&>()))>), std::nullptr_t> = nullptr>
     void Reset(H&& handle, Deleter deleter)
     {
+        if (this->deleter)
+            this->deleter(this->handle);
+
         this->handle = std::forward<H>(handle);
         this->deleter = std::move(deleter);
     }
 
-    void Invalidate() { deleter = nullptr; }
+    void Invalidate() { deleter = {}; }
 
 private:
     Handle handle;
