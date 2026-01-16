@@ -262,7 +262,7 @@ namespace
                     }
 
                     return value;
-                }) >> stdext::to_utf16() >> stdext::make_consumer<WCHAR>(std::back_inserter(raw_args));
+                }) >> stdext::to_utf16(), stdext::make_consumer<WCHAR>(std::back_inserter(raw_args));
                 raw_args.push_back(L'\0');
 
                 int count;

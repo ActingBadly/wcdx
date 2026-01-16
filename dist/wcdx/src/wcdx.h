@@ -12,9 +12,28 @@
 
 #include <comdef.h>
 #include <d3d9.h>
-
+#include <random>
 
 #define DEBUG_SCREENSHOTS 0
+
+// Moved namespace contents from wcdx.cpp here so widescreen.h can include wcdx.h without circular dependency.
+namespace
+{
+    enum
+    {
+        WM_APP_RENDER = WM_APP,
+        WM_APP_ASPECT_CHANGED = WM_APP + 1
+    };
+
+    POINT ConvertTo(POINT point, RECT rect);
+    POINT ConvertFrom(POINT point, RECT rect);
+    HRESULT GetSavedGamePath(LPCWSTR subdir, LPWSTR path);
+    HRESULT GetLocalAppDataPath(LPCWSTR subdir, LPWSTR path);
+
+    bool CreateDirectoryRecursive(LPWSTR pathName);
+
+    std::independent_bits_engine<std::mt19937, 1, unsigned int> RandomBit(std::random_device{}());
+}
 
 class Wcdx : public IWcdx
 {
@@ -108,7 +127,8 @@ private:
     bool _fullScreen;
     bool _dirty;
     bool _sizeChanged;
-
+// Store time of last mouse movement for cursor hiding
+    unsigned long long _lastMouseMoveTick; 
 #if DEBUG_SCREENSHOTS
     int _screenshotFrameCounter;
     std::byte _screenshotBuffers[10][ContentWidth * ContentHeight];
@@ -118,5 +138,8 @@ private:
     size_t _screenshotFileIndex;
 #endif
 };
+
+// Need the inject tag in wcdx.h for use in KJ_Mouse.h and KJ_Keyboard.h
+static constexpr ULONG_PTR WCDX_INJECT_TAG = 0x57434458; // 'WCDX'
 
 #endif

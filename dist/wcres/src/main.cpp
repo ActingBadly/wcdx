@@ -206,7 +206,7 @@ namespace
                 _src_byte = _stream->read<std::byte>();
                 _src_bit_position = 0;
             }
-            size_t bits_used = stdext::min(bit_width, size_t(CHAR_BIT - _src_bit_position));
+            size_t bits_used = (bit_width < size_t(CHAR_BIT - _src_bit_position)) ? bit_width : size_t(CHAR_BIT - _src_bit_position);
             auto byte = (_src_byte >> _src_bit_position) & std::byte((1 << bits_used) - 1);
             _src_bit_position += bits_used;
             bit_width -= bits_used;

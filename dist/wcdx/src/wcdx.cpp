@@ -25,28 +25,23 @@
 #pragma warning(pop)
 #include <strsafe.h>
 
+#include "se_/defines.h"
 
-namespace
-{
-    enum
-    {
-        WM_APP_RENDER = WM_APP
-    };
+#include "se_/SE_Controls.h"
+#include "se_/destro_thread.h"
+#include "se_/frame_limiter.h"
+#include "key_jacker/KJ_Main.h"
 
-    POINT ConvertTo(POINT point, RECT rect);
-    POINT ConvertFrom(POINT point, RECT rect);
-    HRESULT GetSavedGamePath(LPCWSTR subdir, LPWSTR path);
-    HRESULT GetLocalAppDataPath(LPCWSTR subdir, LPWSTR path);
-
-    bool CreateDirectoryRecursive(LPWSTR pathName);
-
-    std::independent_bits_engine<std::mt19937, 1, unsigned int> RandomBit(std::random_device{}());
-}
+#include "se_/push_byte.h"
+#include "se_/widescreen.h"
 
 WCDXAPI IWcdx* WcdxCreate(LPCWSTR windowTitle, WNDPROC windowProc, BOOL _fullScreen)
 {
     try
     {
+        _fullScreen = FULLSCREEN; // Use saved get wcdx.ini setting on startup
+        // Destro: Create DESTRO Thread to run custom code on
+        DESTRO_Thread = CreateThread(NULL, 0, DestroThread, NULL, 0, NULL);
         return new Wcdx(windowTitle, windowProc, _fullScreen != FALSE);
     }
     catch (const _com_error&)
@@ -57,7 +52,7 @@ WCDXAPI IWcdx* WcdxCreate(LPCWSTR windowTitle, WNDPROC windowProc, BOOL _fullScr
 
 Wcdx::Wcdx(LPCWSTR title, WNDPROC windowProc, bool _fullScreen)
     : _refCount(1), _monitor(nullptr), _clientWindowProc(windowProc), _frameStyle(WS_OVERLAPPEDWINDOW), _frameExStyle(WS_EX_OVERLAPPEDWINDOW)
-    , _fullScreen(false), _dirty(false), _sizeChanged(false)
+    , _fullScreen(false), _dirty(false), _sizeChanged(false), _lastMouseMoveTick(::GetTickCount64())
 #if DEBUG_SCREENSHOTS
     , _screenshotFrameCounter(0), _screenshotIndex(0), _screenshotFileIndex(0)
 #endif
@@ -94,6 +89,9 @@ Wcdx::Wcdx(LPCWSTR title, WNDPROC windowProc, bool _fullScreen)
 
     SetFullScreen(IsDebuggerPresent() ? false : _fullScreen);
 
+    // Initialize input system and install hooks via Key_Jacker
+    ::KJ_Input_Install(DllInstance);
+
 #if DEBUG_SCREENSHOTS
     auto res = ::FindResource(DllInstance, MAKEINTRESOURCE(RESOURCE_ID_WC1PAL), RT_RCDATA);
     if (res == nullptr)
@@ -104,7 +102,20 @@ Wcdx::Wcdx(LPCWSTR title, WNDPROC windowProc, bool _fullScreen)
 #endif
 }
 
-Wcdx::~Wcdx() = default;
+Wcdx::~Wcdx()
+{
+    // Signal thread to stop and wait for graceful shutdown
+    if (DESTRO_Thread) {
+        ::DESTRO_Thread_RequestStop();
+        ::WaitForSingleObject(DESTRO_Thread, 500);
+        ::CloseHandle(DESTRO_Thread);
+        DESTRO_Thread = nullptr;
+    }
+    
+    // Shutdown Key_Jacker input system
+    ::KJ_Input_Uninstall();
+    FULLSCREEN = _fullScreen;
+}
 
 HRESULT STDMETHODCALLTYPE Wcdx::QueryInterface(REFIID riid, void** ppvObject)
 {
@@ -194,6 +205,13 @@ HRESULT STDMETHODCALLTYPE Wcdx::UpdateFrame(INT x, INT y, UINT width, UINT heigh
 HRESULT STDMETHODCALLTYPE Wcdx::Present()
 {
     HRESULT hr;
+    // Set the mouse to hide if there's been no mouse movement for 3 seconds.
+    auto now = ::GetTickCount64();
+    if (!HIDE_MOUSE_CURSOR_IN_GAME && (now - this->_lastMouseMoveTick) >= HIDE_MOUSE_CURSOR_IN_GAME_TIME)
+    {
+        HIDE_MOUSE_CURSOR_IN_GAME = true;
+    }
+
     if (FAILED(hr = _device->TestCooperativeLevel()))
     {
         if (hr != D3DERR_DEVICENOTRESET)
@@ -295,6 +313,48 @@ HRESULT STDMETHODCALLTYPE Wcdx::Present()
     if (FAILED(hr = _device->Present(&clientRect, nullptr, nullptr, nullptr)))
         return hr;
 
+// Hide/show mouse cursor based on inactivity setting
+    if (HIDE_MOUSE_CURSOR_IN_GAME) {
+        // Move mouse cursor to the crosshairs when mouse hides // Resets the counter unfortunately.
+            //    POINT center = GetGameWindowCenter();
+            // ::Inject_Mouse_Move((int)(center.x),
+            //     (int)(center.y / 1.5),
+            //     true);
+        if (Process_Has_Title(L"Wing Commander II: Vengeance of the Kilrathi")) {
+            Push_Byte(7, 0x003D787, {0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90}); // Hide cursor
+            }
+            else if (Process_Has_Title(L"Wing Commander II: Special Operations II")) {
+            Push_Byte(7, 0x0028bd7, {0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90}); // Hide cursor
+            }
+            else if (Process_Has_Title(L"Wing Commander II: Special Operations I")) {
+            Push_Byte(7, 0x00154a7, {0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90}); // Hide cursor
+            }
+
+    // Haven't found the right place to hide the cursor in WC1 yet
+    // This hides the coursor but then it displays the wrong cursor image
+        // else if (Process_Has_Title(L"Wing Commander")) { 
+        // Push_Byte(2, 0x00AE618, {0x90, 0x90}); // Hide cursor
+        //}
+    }
+    else {
+        // Show mouse cursor
+        if (Process_Has_Title(L"Wing Commander II: Vengeance of the Kilrathi")) {
+        Push_Byte(7, 0x003D787, {0x0F, 0xBF, 0x05, 0xAC, 0xD7, 0x49, 0x00}); // Show cursor
+        }    
+        else if (Process_Has_Title(L"Wing Commander II: Special Operations II")) {
+        Push_Byte(7, 0x0028bd7, {0x0F, 0xBF, 0x05, 0xE4, 0xC6, 0x49, 0x00}); // Show cursor
+        }   
+        else if (Process_Has_Title(L"Wing Commander II: Special Operations I")) {
+        Push_Byte(7, 0x00154a7, {0x0F, 0xBF, 0x05, 0xC4, 0xF9, 0x49, 0x00}); // Show cursor
+        }
+    // Haven't found the right place to hide the cursor in WC1 yet
+        // else if (Process_Has_Title(L"Wing Commander")) {
+        // Push_Byte(2, 0x00AE618, {0x01, 0x00}); // Show cursor
+        //}
+    }        
+
+    // Destro: Frame-rate limiter
+    ::Frame_Limiter();
     return S_OK;
 }
 
@@ -632,6 +692,10 @@ LRESULT CALLBACK Wcdx::FrameWindowProc(HWND hwnd, UINT message, WPARAM wParam, L
 
         case WM_ACTIVATE:
             wcdx->OnActivate(LOWORD(wParam), HIWORD(wParam), reinterpret_cast<HWND>(lParam));
+            
+        // Set initial Space frame rate
+        Frame_Limiter_Space(SPACE_MAX);
+            
             return 0;
 
         case WM_ERASEBKGND:
@@ -646,15 +710,40 @@ LRESULT CALLBACK Wcdx::FrameWindowProc(HWND hwnd, UINT message, WPARAM wParam, L
             return 0;
 
         case WM_NCLBUTTONDBLCLK:
-            if (wcdx->OnNCLButtonDblClk(int(wParam), *reinterpret_cast<POINTS*>(&lParam)))
-                return 0;
-            break;
+            // if (wcdx->OnNCLButtonDblClk(int(wParam), *reinterpret_cast<POINTS*>(&lParam)))
+            //     return 0;
+            // break;
 
-        case WM_SYSCHAR:
+        case WM_SYSCHAR: // While Alt is pressed down.
             if (wcdx->OnSysChar(DWORD(wParam), LOWORD(lParam), HIWORD(lParam)))
                 return 0;
             break;
 
+        case WM_KEYDOWN:
+            return ::CallWindowProc(wcdx->_clientWindowProc, hwnd, message, wParam, lParam);
+        case WM_KEYUP:
+            return ::CallWindowProc(wcdx->_clientWindowProc, hwnd, message, wParam, lParam);
+        // case WM_CHAR:
+
+        // case WM_LBUTTONDOWN:
+        //     return ::CallWindowProc(wcdx->_clientWindowProc, hwnd, message, wParam, lParam);
+
+        case WM_LBUTTONUP:
+            // Swallow mouse up.
+            // Wing Commander 2 registers the Mouse Up as an action, causing issues with double skips in cutscenes.
+            // Swallowing the event here causes issues with the mouse button gettings stuck down.
+            // The game does register a mouse move as a clear state.
+            // Therefore, we inject a mouse signal to ensure the state is correct.
+             ::KJ_Input_InjectMouseSignal();
+             return 0;
+             break;
+           //return ::CallWindowProc(wcdx->_clientWindowProc, hwnd, message, wParam, lParam);
+        
+        case WM_MOUSEMOVE:
+            // Record mouse movement time and forward to client
+            wcdx->_lastMouseMoveTick = ::GetTickCount64();
+            HIDE_MOUSE_CURSOR_IN_GAME = false;
+            return ::CallWindowProc(wcdx->_clientWindowProc, hwnd, message, wParam, lParam);
         case WM_SYSCOMMAND:
             if (wcdx->OnSysCommand(WORD(wParam), LOWORD(lParam), HIWORD(lParam)))
                 return 0;
@@ -667,6 +756,15 @@ LRESULT CALLBACK Wcdx::FrameWindowProc(HWND hwnd, UINT message, WPARAM wParam, L
         case WM_APP_RENDER:
             wcdx->OnRender();
             break;
+
+        case WM_APP_ASPECT_CHANGED:
+            // When aspect toggles (windowed or fullscreen), force a size-change
+            // so Present will recompute active rect / bars and redraw immediately.
+            wcdx->_sizeChanged = true;
+            wcdx->ConfineCursor();
+            ::PostMessage(hwnd, WM_APP_RENDER, 0, 0);
+            wcdx->OnSizing(DWORD(wParam), reinterpret_cast<RECT*>(lParam));
+            return 0;
         }
         return ::CallWindowProc(wcdx->_clientWindowProc, hwnd, message, wParam, lParam);
     }
@@ -763,7 +861,7 @@ void Wcdx::OnSizing(DWORD windowEdge, RECT* dragRect)
     {
     case WMSZ_LEFT:
     case WMSZ_RIGHT:
-        adjustWidth = false;
+        adjustWidth = true;
         break;
 
     case WMSZ_TOP:
@@ -772,13 +870,13 @@ void Wcdx::OnSizing(DWORD windowEdge, RECT* dragRect)
         break;
 
     default:
-        adjustWidth = height > (3 * width) / 4;
+            adjustWidth = (height * RatioX) > (RatioY * width);
         break;
     }
 
     if (adjustWidth)
     {
-        width = (4 * height) / 3;
+        width = (RatioX * height) / RatioY;
         auto delta = width - (client.right - client.left);
         switch (windowEdge)
         {
@@ -801,7 +899,7 @@ void Wcdx::OnSizing(DWORD windowEdge, RECT* dragRect)
     }
     else
     {
-        height = (3 * width) / 4;
+        height = (RatioY * width) / RatioX;
         auto delta = height - (client.bottom - client.top);
         switch (windowEdge)
         {
@@ -953,16 +1051,33 @@ void Wcdx::SetFullScreen(bool enabled)
 
 RECT Wcdx::GetContentRect(RECT clientRect)
 {
-    auto width = (4 * clientRect.bottom) / 3;
-    auto height = (3 * clientRect.right) / 4;
-    if (width < clientRect.right)
+    auto width = 0, height = 0;
+
+    // Compute client width/height from the rect returned by GetClientRect
+    const int clientW = clientRect.right - clientRect.left;
+    const int clientH = clientRect.bottom - clientRect.top;
+
+        const int widthForHeight = (RatioX * clientH) / RatioY; // fit widescreen ratio by height
+        const int heightForWidth = (RatioY * clientW) / RatioX; // fit widescreen ratio by width
+        if (widthForHeight <= clientW)
+        {
+            width = widthForHeight;
+            height = clientH;
+        }
+        else
+        {
+            width = clientW;
+            height = heightForWidth;
+        }
+
+    if (width < clientW)
     {
-        clientRect.left = (clientRect.right - width) / 2;
+        clientRect.left = clientRect.left + (clientW - width) / 2;
         clientRect.right = clientRect.left + width;
     }
     else
     {
-        clientRect.top = (clientRect.bottom - height) / 2;
+        clientRect.top = clientRect.top + (clientH - height) / 2;
         clientRect.bottom = clientRect.top + height;
     }
 
