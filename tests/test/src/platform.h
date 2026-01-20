@@ -4,7 +4,6 @@
 
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
-struct IUnknown;
 #include <Windows.h>
 
 #endif

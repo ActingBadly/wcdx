@@ -20,7 +20,6 @@
 
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
-struct IUnknown;
 #include <Windows.h>
 #include <comdef.h>
 

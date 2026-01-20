@@ -16,14 +16,7 @@
 #include <Shlwapi.h>
 #include <comdef.h>
 
-// GDI+ headers use unqualified min and max (probably expecting the Windows macros)
-using std::min;
-using std::max;
-#pragma warning(push)
-#pragma warning(disable: 4458)  // declaration of 'identifier' hides class member
-#pragma warning(disable: 4596)  // 'name': illegal qualified name in member declaration
 #include <gdiplus.h>
-#pragma warning(pop)
 
 
 using namespace Gdiplus;

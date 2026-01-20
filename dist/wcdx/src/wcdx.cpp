@@ -19,10 +19,7 @@
 #include <io.h>
 #include <fcntl.h>
 
-#pragma warning(push)
-#pragma warning(disable:4091)   // 'typedef ': ignored on left of 'tagGPFIDL_FLAGS' when no variable is declared
 #include <Shlobj.h>
-#pragma warning(pop)
 #include <strsafe.h>
 
 

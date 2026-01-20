@@ -20,7 +20,6 @@
 #include <cwchar>
 
 #define NOMINMAX
-struct IUnknown;
 #include <Windows.h>
 #include <comip.h>
 #include <comdef.h>

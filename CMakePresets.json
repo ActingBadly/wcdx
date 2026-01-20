@@ -5,7 +5,6 @@
             "name": "_vsbase",
             "hidden": true,
             "architecture": "Win32",
-            "toolset": "v141_xp",
             "binaryDir": "build"
         },
         {
