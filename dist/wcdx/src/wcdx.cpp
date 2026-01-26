@@ -769,13 +769,13 @@ void Wcdx::OnSizing(DWORD windowEdge, RECT* dragRect)
         break;
 
     default:
-        adjustWidth = height > (3 * width) / 4;
+        adjustWidth = height > (Aspect_Ratio_Y * width) / Aspect_Ratio_X;
         break;
     }
 
     if (adjustWidth)
     {
-        width = (4 * height) / 3;
+        width = (Aspect_Ratio_X * height) / Aspect_Ratio_Y;
         auto delta = width - (client.right - client.left);
         switch (windowEdge)
         {
@@ -798,7 +798,7 @@ void Wcdx::OnSizing(DWORD windowEdge, RECT* dragRect)
     }
     else
     {
-        height = (3 * width) / 4;
+        height = (Aspect_Ratio_Y * width) / Aspect_Ratio_X;
         auto delta = height - (client.bottom - client.top);
         switch (windowEdge)
         {
@@ -950,8 +950,8 @@ void Wcdx::SetFullScreen(bool enabled)
 
 RECT Wcdx::GetContentRect(RECT clientRect)
 {
-    auto width = (4 * clientRect.bottom) / 3;
-    auto height = (3 * clientRect.right) / 4;
+    auto width = (Aspect_Ratio_X * clientRect.bottom) / Aspect_Ratio_Y;
+    auto height = (Aspect_Ratio_Y * clientRect.right) / Aspect_Ratio_X;
     if (width < clientRect.right)
     {
         clientRect.left = (clientRect.right - width) / 2;

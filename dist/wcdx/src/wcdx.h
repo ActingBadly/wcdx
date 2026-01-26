@@ -108,7 +108,9 @@ private:
     bool _fullScreen;
     bool _dirty;
     bool _sizeChanged;
-
+    int Aspect_Ratio_X = 4;
+    int Aspect_Ratio_Y = 3;
+    
 #if DEBUG_SCREENSHOTS
     int _screenshotFrameCounter;
     std::byte _screenshotBuffers[10][ContentWidth * ContentHeight];
