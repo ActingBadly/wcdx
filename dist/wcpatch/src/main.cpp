@@ -3,6 +3,7 @@
 #include "res/resources.h"
 
 #include <stdext/file.h>
+#include <stdext/format.h>
 #include <stdext/multi.h>
 #include <stdext/string_view.h>
 #include <stdext/unicode.h>
@@ -401,7 +402,16 @@ bool apply_dif(stdext::multi_ref<stdext::stream, stdext::seekable> file_data, ui
         seekable.seek(stdext::seek_from::begin, offset);
         auto value = stream.read<std::byte>();
         if (value != original_value)
+        {
+            stdext::format(stdext::strerr(),
+                "apply_dif: mismatch at offset 0x${0:X}: file=0x${1:02X} expected=0x${2:02X} replace=0x${3:02X}\n",
+                offset,
+                uint8_t(value),
+                uint8_t(original_value),
+                uint8_t(replacement_value));
+
             return false;
+        }
         seekable.seek(stdext::seek_from::current, -1);
         stream.write(replacement_value);
     }
